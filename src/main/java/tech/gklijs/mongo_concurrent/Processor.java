@@ -1,13 +1,15 @@
 package tech.gklijs.mongo_concurrent;
 
-import com.mongodb.TransactionOptions;
-import com.mongodb.WriteConcern;
-import com.mongodb.client.ClientSession;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.mongodb.MongoDatabaseUtils;
+import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
 
 import java.time.Instant;
 import java.util.Random;
@@ -34,18 +36,19 @@ public class Processor {
     /**
      * process one event will return false if there was no event processed
      *
-     * @param database     db used
+     * @param factory     Spring factory to create the database, this way it's bound to the current transaction
      * @param threadNumber sequence number of the thread (0-based)
      * @param totalThreads total number of threads used for processing
      * @return if an event was processed, when returning false it's likely at the end of the stream
      */
-    static boolean processOne(MongoDatabase database, ClientSession session, int threadNumber, int totalThreads) {
+    static boolean processOne(SimpleMongoClientDatabaseFactory factory, int threadNumber, int totalThreads) {
+        MongoDatabase database = MongoDatabaseUtils.getDatabase(factory);
         MongoCollection<Document> eventsCol = database.getCollection("events");
         MongoCollection<Document> tokensCol = database.getCollection("tokens");
         MongoCollection<Document> projectionCol = database.getCollection("projection");
-        Document token = tokensCol.find(session, eq("tn", threadNumber)).first();
+        Document token = tokensCol.find(eq("tn", threadNumber)).first();
         int nextEvent = isNull(token) ? threadNumber : token.getInteger("en") + totalThreads;
-        Document event = eventsCol.find(session, eq("token", nextEvent)).first();
+        Document event = eventsCol.find(eq("token", nextEvent)).first();
         if (isNull(event)) {
             LOGGER.info("No event found with token: {}", nextEvent);
             return false;
@@ -56,37 +59,37 @@ public class Processor {
             Document newToken = new Document();
             newToken.put("tn", threadNumber);
             newToken.put("en", nextEvent);
-            tokensCol.insertOne(session, newToken);
+            tokensCol.insertOne(newToken);
         } else {
-            tokensCol.updateOne(session, eq("tn", threadNumber), set("en", nextEvent));
+            tokensCol.updateOne(eq("tn", threadNumber), set("en", nextEvent));
         }
-        if (RANDOM.nextBoolean()) {
+        if (RANDOM.nextBoolean()){
             throw new RuntimeException("not this time");
         }
         event.put("processedAt", Instant.now().toEpochMilli());
-        projectionCol.insertOne(session, event);
-        projectionCol.updateOne(session, eq("name", "tracker"), set("lastProcessed", nextEvent));
+        projectionCol.insertOne(event);
+        projectionCol.updateOne(eq("name", "tracker"), set("lastProcessed", nextEvent));
         LOGGER.info("Successfully processed event with result {}", event);
         return true;
     }
 
-    static Runnable processAll(MongoDatabase database, ClientSession session, int threadNumber, int totalThreads) {
+    static Runnable processAll(SimpleMongoClientDatabaseFactory factory, PlatformTransactionManager transactionManager, int threadNumber,
+                               int totalThreads) {
         return () -> {
             boolean done = false;
             while (!done) {
                 LOGGER.info("going to start new transaction");
-                session.startTransaction(TransactionOptions.builder().writeConcern(WriteConcern.MAJORITY).build());
+                TransactionStatus transaction = transactionManager.getTransaction(TransactionDefinition.withDefaults());
                 try {
                     LOGGER.info("about to process one event");
-                    done = !processOne(database, session, threadNumber, totalThreads);
+                    done = !processOne(factory, threadNumber, totalThreads);
                     LOGGER.info("about to commit transaction");
-                    session.commitTransaction();
+                    transactionManager.commit(transaction);
                 } catch (Exception e) {
                     LOGGER.warn("exception processing one", e);
-                    session.abortTransaction();
+                    transactionManager.rollback(transaction);
                 }
             }
-            session.close();
         };
     }
 }
