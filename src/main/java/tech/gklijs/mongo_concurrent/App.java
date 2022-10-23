@@ -3,8 +3,11 @@ package tech.gklijs.mongo_concurrent;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoDatabase;
+import org.axonframework.common.transaction.TransactionManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.mongodb.MongoDatabaseUtils;
+import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -24,16 +27,19 @@ public class App {
                     TOTAL_EVENTS,
                     TOTAL_THREADS);
         try (MongoClient mongoClient = MongoClients.create(CONNECT_URI)) {
-            MongoDatabase database = mongoClient.getDatabase("test");
+            SimpleMongoClientDatabaseFactory factory =
+                    new SimpleMongoClientDatabaseFactory(mongoClient, "test");
+            MongoDatabase database = MongoDatabaseUtils.getDatabase(factory);
             database.getCollection("events").drop();
             database.getCollection("projection").drop();
             database.getCollection("tokens").drop();
+            TransactionManager transactionManager = TransactionManagerSupplier.get(factory);
             EventsCreator.createEvents(database, TOTAL_EVENTS);
             Processor.setLastEventProcessedTracker(database);
             database.getCollection("tokens");
             IntStream.range(0, TOTAL_THREADS)
                      .forEach(i -> executorService.submit(
-                             Processor.processAll(database, mongoClient.startSession(), i, TOTAL_THREADS)
+                             Processor.processAll(factory, transactionManager, i, TOTAL_THREADS)
                      ));
             executorService.shutdown();
             boolean result = executorService.awaitTermination(30L, TimeUnit.MINUTES);
