@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
+import java.util.Random;
 
 import static com.mongodb.client.model.Filters.eq;
 import static com.mongodb.client.model.Updates.set;
@@ -18,6 +19,7 @@ import static java.util.Objects.isNull;
 public class Processor {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(Processor.class);
+    private static final Random RANDOM = new Random();
 
     private Processor() {
         //utility class
@@ -32,7 +34,7 @@ public class Processor {
     /**
      * process one event will return false if there was no event processed
      *
-     * @param database db used
+     * @param database     db used
      * @param threadNumber sequence number of the thread (0-based)
      * @param totalThreads total number of threads used for processing
      * @return if an event was processed, when returning false it's likely at the end of the stream
@@ -57,6 +59,9 @@ public class Processor {
             tokensCol.insertOne(session, newToken);
         } else {
             tokensCol.updateOne(session, eq("tn", threadNumber), set("en", nextEvent));
+        }
+        if (RANDOM.nextBoolean()) {
+            throw new RuntimeException("not this time");
         }
         event.put("processedAt", Instant.now().toEpochMilli());
         projectionCol.insertOne(session, event);

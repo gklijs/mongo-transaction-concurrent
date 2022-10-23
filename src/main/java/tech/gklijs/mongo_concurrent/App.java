@@ -25,6 +25,9 @@ public class App {
                     TOTAL_THREADS);
         try (MongoClient mongoClient = MongoClients.create(CONNECT_URI)) {
             MongoDatabase database = mongoClient.getDatabase("test");
+            database.getCollection("events").drop();
+            database.getCollection("projection").drop();
+            database.getCollection("tokens").drop();
             EventsCreator.createEvents(database, TOTAL_EVENTS);
             Processor.setLastEventProcessedTracker(database);
             database.getCollection("tokens");
@@ -43,8 +46,8 @@ public class App {
             if (projectionCount == TOTAL_EVENTS + 1) {
                 LOGGER.info("All events are now part of the projection");
             } else {
-                LOGGER.warn("Not al events are part of the projection, {} are missing",
-                            projectionCount + 1 - TOTAL_EVENTS);
+                LOGGER.warn("Not all events are part of the projection, {} are missing",
+                            TOTAL_EVENTS - 1 - projectionCount);
             }
         } catch (Exception e) {
             LOGGER.warn("unexpected exception in main thread", e);
