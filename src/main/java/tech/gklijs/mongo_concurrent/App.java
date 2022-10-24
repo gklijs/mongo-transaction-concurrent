@@ -47,7 +47,7 @@ public class App {
                 LOGGER.info("All events are now part of the projection");
             } else {
                 LOGGER.warn("Not all events are part of the projection, {} are missing",
-                            TOTAL_EVENTS - 1 - projectionCount);
+                            TOTAL_EVENTS + 1 - projectionCount);
             }
         } catch (Exception e) {
             LOGGER.warn("unexpected exception in main thread", e);
